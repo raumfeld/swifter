@@ -36,7 +36,7 @@ public class HttpServer: HttpServerIO {
     public var DELETE, UPDATE, HEAD, POST, GET, PUT : MethodRoute
     public var delete, update, head, post, get, put : MethodRoute
 
-    public subscript(path: String) -> ((HttpRequest) -> HttpResponse)? {
+    public subscript(path: String) -> (HttpRequest -> HttpResponse)? {
         set {
             router.register(nil, path: path, handler: newValue)
         }
