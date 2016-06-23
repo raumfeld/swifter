@@ -16,10 +16,12 @@ public class HttpServerIO {
     private var listenSocket: Socket = Socket(socketFileDescriptor: -1)
     private var clientSockets: Set<Socket> = []
     private let clientSocketsLock = Lock()
-    
+    private(set) public var port : in_port_t = 0
+
     public func start(_ listenPort: in_port_t = 8080, forceIPv4: Bool = false) throws {
         stop()
         listenSocket = try Socket.tcpSocketForListen(listenPort, forceIPv4: forceIPv4)
+        port = listenPort
         DispatchQueue.global(attributes: DispatchQueue.GlobalAttributes.qosBackground).async {
             while let socket = try? self.listenSocket.acceptClientSocket() {
                 self.lock(self.clientSocketsLock) {
@@ -38,6 +40,7 @@ public class HttpServerIO {
     
     public func stop() {
         listenSocket.release()
+        port = 0
         lock(self.clientSocketsLock) {
             for socket in self.clientSockets {
                 socket.shutdwn()
