@@ -13,22 +13,22 @@
 
 /* Low level routines for POSIX sockets */
 
-public enum SocketError: ErrorType {
-    case SocketCreationFailed(String)
-    case SocketSettingReUseAddrFailed(String)
-    case BindFailed(String)
-    case ListenFailed(String)
-    case WriteFailed(String)
-    case GetPeerNameFailed(String)
-    case ConvertingPeerNameFailed
-    case GetNameInfoFailed(String)
-    case AcceptFailed(String)
-    case RecvFailed(String)
+public enum SocketError: ErrorProtocol {
+    case socketCreationFailed(String)
+    case socketSettingReUseAddrFailed(String)
+    case bindFailed(String)
+    case listenFailed(String)
+    case writeFailed(String)
+    case getPeerNameFailed(String)
+    case convertingPeerNameFailed
+    case getNameInfoFailed(String)
+    case acceptFailed(String)
+    case recvFailed(String)
 }
 
 public class Socket: Hashable, Equatable {
     
-    public class func tcpSocketForListen(port: in_port_t, forceIPv4: Bool = false, maxPendingConnection: Int32 = SOMAXCONN) throws -> Socket {
+    public class func tcpSocketForListen(_ port: in_port_t, forceIPv4: Bool = false, maxPendingConnection: Int32 = SOMAXCONN) throws -> Socket {
         
         #if os(Linux)
             let socketFileDescriptor = socket(forceIPv4 ? AF_INET : AF_INET6, Int32(SOCK_STREAM.rawValue), 0)
@@ -37,14 +37,14 @@ public class Socket: Hashable, Equatable {
         #endif
         
         if socketFileDescriptor == -1 {
-            throw SocketError.SocketCreationFailed(Socket.descriptionOfLastError())
+            throw SocketError.socketCreationFailed(Socket.descriptionOfLastError())
         }
         
         var value: Int32 = 1
         if setsockopt(socketFileDescriptor, SOL_SOCKET, SO_REUSEADDR, &value, socklen_t(sizeof(Int32))) == -1 {
             let details = Socket.descriptionOfLastError()
             Socket.release(socketFileDescriptor)
-            throw SocketError.SocketSettingReUseAddrFailed(details)
+            throw SocketError.socketSettingReUseAddrFailed(details)
         }
         Socket.setNoSigPipe(socketFileDescriptor)
         
@@ -91,13 +91,13 @@ public class Socket: Hashable, Equatable {
         if bindResult == -1 {
             let details = Socket.descriptionOfLastError()
             Socket.release(socketFileDescriptor)
-            throw SocketError.BindFailed(details)
+            throw SocketError.bindFailed(details)
         }
         
         if listen(socketFileDescriptor, maxPendingConnection ) == -1 {
             let details = Socket.descriptionOfLastError()
             Socket.release(socketFileDescriptor)
-            throw SocketError.ListenFailed(details)
+            throw SocketError.listenFailed(details)
         }
         return Socket(socketFileDescriptor: socketFileDescriptor)
     }
@@ -123,31 +123,31 @@ public class Socket: Hashable, Equatable {
         var len: socklen_t = 0
         let clientSocket = accept(self.socketFileDescriptor, &addr, &len)
         if clientSocket == -1 {
-            throw SocketError.AcceptFailed(Socket.descriptionOfLastError())
+            throw SocketError.acceptFailed(Socket.descriptionOfLastError())
         }
         Socket.setNoSigPipe(clientSocket)
         return Socket(socketFileDescriptor: clientSocket)
     }
     
-    public func writeUTF8(string: String) throws {
+    public func writeUTF8(_ string: String) throws {
         try writeUInt8(ArraySlice(string.utf8))
     }
     
-    public func writeUInt8(data: [UInt8]) throws {
+    public func writeUInt8(_ data: [UInt8]) throws {
         try writeUInt8(ArraySlice(data))
     }
     
-    public func writeUInt8(data: ArraySlice<UInt8>) throws {
+    public func writeUInt8(_ data: ArraySlice<UInt8>) throws {
         try data.withUnsafeBufferPointer {
             var sent = 0
             while sent < data.count {
                 #if os(Linux)
                     let s = send(self.socketFileDescriptor, $0.baseAddress + sent, Int(data.count - sent), Int32(MSG_NOSIGNAL))
                 #else
-                    let s = write(self.socketFileDescriptor, $0.baseAddress + sent, Int(data.count - sent))
+                    let s = write(self.socketFileDescriptor, $0.baseAddress! + sent, Int(data.count - sent))
                 #endif
                 if s <= 0 {
-                    throw SocketError.WriteFailed(Socket.descriptionOfLastError())
+                    throw SocketError.writeFailed(Socket.descriptionOfLastError())
                 }
                 sent += s
             }
@@ -155,10 +155,10 @@ public class Socket: Hashable, Equatable {
     }
     
     public func read() throws -> UInt8 {
-        var buffer = [UInt8](count: 1, repeatedValue: 0)
+        var buffer = [UInt8](repeating: 0, count: 1)
         let next = recv(self.socketFileDescriptor as Int32, &buffer, Int(buffer.count), 0)
         if next <= 0 {
-            throw SocketError.RecvFailed(Socket.descriptionOfLastError())
+            throw SocketError.recvFailed(Socket.descriptionOfLastError())
         }
         return buffer[0]
     }
@@ -179,23 +179,23 @@ public class Socket: Hashable, Equatable {
     public func peername() throws -> String {
         var addr = sockaddr(), len: socklen_t = socklen_t(sizeof(sockaddr))
         if getpeername(self.socketFileDescriptor, &addr, &len) != 0 {
-            throw SocketError.GetPeerNameFailed(Socket.descriptionOfLastError())
+            throw SocketError.getPeerNameFailed(Socket.descriptionOfLastError())
         }
-        var hostBuffer = [CChar](count: Int(NI_MAXHOST), repeatedValue: 0)
+        var hostBuffer = [CChar](repeating: 0, count: Int(NI_MAXHOST))
         if getnameinfo(&addr, len, &hostBuffer, socklen_t(hostBuffer.count), nil, 0, NI_NUMERICHOST) != 0 {
-            throw SocketError.GetNameInfoFailed(Socket.descriptionOfLastError())
+            throw SocketError.getNameInfoFailed(Socket.descriptionOfLastError())
         }
-        guard let name = String.fromCString(hostBuffer) else {
-            throw SocketError.ConvertingPeerNameFailed
+        guard let name = String(validatingUTF8: hostBuffer) else {
+            throw SocketError.convertingPeerNameFailed
         }
         return name
     }
     
     private class func descriptionOfLastError() -> String {
-        return String.fromCString(UnsafePointer(strerror(errno))) ?? "Error: \(errno)"
+        return String(cString: UnsafePointer(strerror(errno))) ?? "Error: \(errno)"
     }
     
-    private class func setNoSigPipe(socket: Int32) {
+    private class func setNoSigPipe(_ socket: Int32) {
         #if os(Linux)
             // There is no SO_NOSIGPIPE in Linux (nor some other systems). You can instead use the MSG_NOSIGNAL flag when calling send(),
             // or use signal(SIGPIPE, SIG_IGN) to make your entire application ignore SIGPIPE.
@@ -206,24 +206,24 @@ public class Socket: Hashable, Equatable {
         #endif
     }
     
-    private class func shutdwn(socket: Int32) {
+    private class func shutdwn(_ socket: Int32) {
         #if os(Linux)
             shutdown(socket, Int32(SHUT_RDWR))
         #else
-            Darwin.shutdown(socket, SHUT_RDWR)
+            _ = Darwin.shutdown(socket, SHUT_RDWR)
         #endif
     }
     
-    private class func release(socket: Int32) {
+    private class func release(_ socket: Int32) {
         #if os(Linux)
             shutdown(socket, Int32(SHUT_RDWR))
         #else
-            Darwin.shutdown(socket, SHUT_RDWR)
+            _ = Darwin.shutdown(socket, SHUT_RDWR)
         #endif
         close(socket)
     }
     
-    private class func htonsPort(port: in_port_t) -> in_port_t {
+    private class func htonsPort(_ port: in_port_t) -> in_port_t {
         #if os(Linux)
             return htons(port)
         #else

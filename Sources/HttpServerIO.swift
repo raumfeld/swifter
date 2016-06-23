@@ -15,17 +15,17 @@ public class HttpServerIO {
     
     private var listenSocket: Socket = Socket(socketFileDescriptor: -1)
     private var clientSockets: Set<Socket> = []
-    private let clientSocketsLock = NSLock()
+    private let clientSocketsLock = Lock()
     
-    public func start(listenPort: in_port_t = 8080, forceIPv4: Bool = false) throws {
+    public func start(_ listenPort: in_port_t = 8080, forceIPv4: Bool = false) throws {
         stop()
         listenSocket = try Socket.tcpSocketForListen(listenPort, forceIPv4: forceIPv4)
-        dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_BACKGROUND, 0)) {
+        DispatchQueue.global(attributes: DispatchQueue.GlobalAttributes.qosBackground).async {
             while let socket = try? self.listenSocket.acceptClientSocket() {
                 self.lock(self.clientSocketsLock) {
                     self.clientSockets.insert(socket)
                 }
-                dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_BACKGROUND, 0), {
+                DispatchQueue.global(attributes: DispatchQueue.GlobalAttributes.qosBackground).async(execute: {
                     self.handleConnection(socket)
                     self.lock(self.clientSocketsLock) {
                         self.clientSockets.remove(socket)
@@ -42,15 +42,15 @@ public class HttpServerIO {
             for socket in self.clientSockets {
                 socket.shutdwn()
             }
-            self.clientSockets.removeAll(keepCapacity: true)
+            self.clientSockets.removeAll(keepingCapacity: true)
         }
     }
     
-    public func dispatch(method: String, path: String) -> ([String: String], HttpRequest -> HttpResponse) {
-        return ([:], { _ in HttpResponse.NotFound })
+    public func dispatch(_ method: String, path: String) -> ([String: String], (HttpRequest) -> HttpResponse) {
+        return ([:], { _ in HttpResponse.notFound })
     }
     
-    private func handleConnection(socket: Socket) {
+    private func handleConnection(_ socket: Socket) {
         let address = try? socket.peername()
         let parser = HttpParser()
         while let request = try? parser.readHttpRequest(socket) {
@@ -75,7 +75,7 @@ public class HttpServerIO {
         socket.release()
     }
     
-    private func lock(handle: NSLock, closure: () -> ()) {
+    private func lock(_ handle: Lock, closure: () -> ()) {
         handle.lock()
         closure()
         handle.unlock();
@@ -83,10 +83,10 @@ public class HttpServerIO {
     
     private struct InnerWriteContext: HttpResponseBodyWriter {
         let socket: Socket
-        func write(data: [UInt8]) {
+        func write(_ data: [UInt8]) {
             write(ArraySlice(data))
         }
-        func write(data: ArraySlice<UInt8>) {
+        func write(_ data: ArraySlice<UInt8>) {
             do {
                 try socket.writeUInt8(data)
             } catch {
@@ -95,7 +95,7 @@ public class HttpServerIO {
         }
     }
     
-    private func respond(socket: Socket, response: HttpResponse, keepAlive: Bool) throws -> Bool {
+    private func respond(_ socket: Socket, response: HttpResponse, keepAlive: Bool) throws -> Bool {
         try socket.writeUTF8("HTTP/1.1 \(response.statusCode()) \(response.reasonPhrase())\r\n")
         
         let content = response.content()
